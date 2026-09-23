@@ -2,11 +2,10 @@ package ru.yandex.kardo.authentication;
 
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.ExpiredJwtException;
+import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.MalformedJwtException;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
-import io.jsonwebtoken.security.SecurityException;
 import io.jsonwebtoken.security.SignatureException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -61,28 +60,8 @@ public class JwtProvider {
     }
 
     private boolean validateToken(String token, SecretKey secret) {
-        try {
-            Jwts.parser()
-                    .verifyWith(secret)
-                    .build()
-                    .parse(token);
-            return true;
-
-        } catch (ExpiredJwtException expJwtEx) {
-            log.debug("{}: {}", expJwtEx.getClass().getSimpleName(), EXPIRED_JWT_MESSAGE);
-            throwJwtValidationException(EXPIRED_JWT_MESSAGE);
-        } catch (MalformedJwtException malJwtEx) {
-            log.debug("{}: {}", malJwtEx.getClass().getSimpleName(), MALFORMED_JWT_MESSAGE);
-            throwJwtValidationException(MALFORMED_JWT_MESSAGE);
-        } catch (SignatureException sigEx) {
-            log.debug("{}: {}", sigEx.getClass().getSimpleName(), SIGNATURE_EXCEPTION_MESSAGE);
-            throwJwtValidationException(SIGNATURE_EXCEPTION_MESSAGE);
-        } catch (SecurityException secEx) {
-            log.debug("{}: {}", secEx.getClass().getSimpleName(), secEx.getMessage());
-            throwJwtValidationException(secEx.getMessage());
-        }
-
-        return false;
+        getClaims(token, secret);
+        return true;
     }
 
     public boolean validateAccessToken(String accessToken) {
@@ -94,11 +73,23 @@ public class JwtProvider {
     }
 
     private Claims getClaims(String token, SecretKey secret) {
-        return (Claims) Jwts.parser()
-                .verifyWith(secret)
-                .build()
-                .parse(token)
-                .getPayload();
+        try {
+            return Jwts.parser()
+                    .verifyWith(secret)
+                    .build()
+                    .parseSignedClaims(token)
+                    .getPayload();
+        } catch (ExpiredJwtException expJwtEx) {
+            log.debug("{}: {}", expJwtEx.getClass().getSimpleName(), EXPIRED_JWT_MESSAGE);
+            throw new JwtValidationException(JWT_VALIDATION_EXCEPTION_REASON, EXPIRED_JWT_MESSAGE);
+        } catch (SignatureException sigEx) {
+            log.debug("{}: {}", sigEx.getClass().getSimpleName(), SIGNATURE_EXCEPTION_MESSAGE);
+            throw new JwtValidationException(JWT_VALIDATION_EXCEPTION_REASON, SIGNATURE_EXCEPTION_MESSAGE);
+        } catch (JwtException | IllegalArgumentException ex) {
+            // Parser messages can contain token data; expose only a stable error.
+            log.debug("{}: {}", ex.getClass().getSimpleName(), MALFORMED_JWT_MESSAGE);
+            throw new JwtValidationException(JWT_VALIDATION_EXCEPTION_REASON, MALFORMED_JWT_MESSAGE);
+        }
     }
 
     public Claims getAccessClaims(String accessToken) {
@@ -109,7 +100,4 @@ public class JwtProvider {
         return getClaims(refreshToken, jwtRefreshSecret);
     }
 
-    private void throwJwtValidationException(String message) {
-        throw new JwtValidationException(JWT_VALIDATION_EXCEPTION_REASON, message);
-    }
 }
